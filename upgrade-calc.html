@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>UA Upgrade Worth It?</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,700;0,800;1,800&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: #06101F; -webkit-tap-highlight-color: transparent; }
+    #root { min-height: 100dvh; }
+    button { -webkit-tap-highlight-color: transparent; outline: none; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel" data-presets="react">
+    const { useState } = React;
+
+    // ── Palette ───────────────────────────────────────────────────────
+    const C = {
+      bg: '#06101F', card: '#0D1929', blue: '#1E7FD9', gold: '#F5A623',
+      green: '#22C55E', amber: '#F59E0B', red: '#EF4444',
+      text: '#F0F4F8', muted: '#6B7E97', border: 'rgba(255,255,255,0.08)',
+    };
+
+    // ── Data ──────────────────────────────────────────────────────────
+    const PAY_TYPES = [
+      { id:'dollars', icon:'$',  label:'Cash',        sub:'Dollar upgrade offer'   },
+      { id:'miles',   icon:'MI', label:'Miles',        sub:'MileagePlus miles'      },
+      { id:'pp',      icon:'PP', label:'Plus Points',  sub:'Premier Platinum / 1K'  },
+      { id:'mm',      icon:'M+', label:'Miles + $',    sub:'Miles with cash copay'  },
+    ];
+
+    const DURATIONS = [
+      { id:'u2',    label:'Under 2 hrs',  ex:'ORD → DTW',  hours:1.5,  lf:false },
+      { id:'2_4',   label:'2 – 4 hrs',   ex:'IAD → DEN',  hours:3,    lf:false },
+      { id:'4_6',   label:'4 – 6 hrs',   ex:'LAX → JFK',  hours:5,    lf:false },
+      { id:'6_8',   label:'6 – 8 hrs',   ex:'EWR → LHR',  hours:7,    lf:true  },
+      { id:'8_10',  label:'8 – 10 hrs',  ex:'ORD → NRT',  hours:9,    lf:true  },
+      { id:'10_14', label:'10 – 14 hrs', ex:'IAH → SIN',  hours:12,   lf:true  },
+      { id:'14p',   label:'14+ hrs',     ex:'EWR → SYD',  hours:16,   lf:true  },
+    ];
+
+    // PlusPoints: United's fixed upgrade chart (valid until Feb 2027 dynamic pricing)
+    const PP_AMOUNTS = [10, 20, 30, 40, 80];
+    const PP_CHART = [
+      { pts:10, desc:'Prem+ → Business class (transcontinental P.S. routes: EWR/SFO/LAX)' },
+      { pts:20, desc:'Economy → Domestic First, OR Economy → Premium Plus (long-haul)' },
+      { pts:30, desc:'Premium Plus → Polaris Business class (long-haul international)' },
+      { pts:40, desc:'Economy → Polaris, standard fare (W class or above: Y/B/M/E/U/H/Q/V/W)' },
+      { pts:80, desc:'Economy → Polaris, discounted fare (S/T/L/K/G — costs 2× standard)' },
+    ];
+
+    const AMT = {
+      dollars: [100, 200, 350, 500, 750, 1000, 1500, 2000],
+      miles:   [5000, 10000, 15000, 20000, 30000, 40000, 60000, 80000],
+    };
+    const MM_MILES = [5000, 10000, 15000, 20000, 30000, 40000];
+    const MM_CASH  = [50, 100, 150, 200, 300, 500];
+
+    const VIBE_QS = [
+      { q:'How do you sleep\non planes?', opts:[
+        { l:'Like a log — anywhere',           p:-2 },
+        { l:'Badly without lying flat',        p:2  },
+        { l:'Only if fully reclined',          p:3  },
+        { l:'I simply do not sleep',           p:1  },
+      ]},
+      { q:'What kind of\ntrip is this?', opts:[
+        { l:'Pure vacation, why not',          p:2  },
+        { l:'Work — need to arrive fresh',     p:3  },
+        { l:'Red-eye, just get me there',      p:-1 },
+        { l:'No particular reason',            p:0  },
+      ]},
+      { q:'How does the\nprice feel?', opts:[
+        { l:'Honestly... steep',               p:-3 },
+        { l:'Fair for what it is',             p:1  },
+        { l:'Points = basically free',         p:2  },
+        { l:'Price? What price?',              p:3  },
+      ]},
+    ];
+
+    const VIBE_RESULTS = [
+      { min:6,   v:'Book it',    c:C.green, msg:"You were going to do it anyway. Stop reading and click confirm." },
+      { min:2,   v:'Worth it',   c:C.green, msg:"The stars are aligned. Your back will thank you at landing." },
+      { min:-1,  v:'Probably?',  c:C.amber, msg:"Leaning yes. Life is short and the seat is wide." },
+      { min:-4,  v:'Borderline', c:C.amber, msg:"Could go either way. You'll probably be fine in economy." },
+      { min:-99, v:'Pass',       c:C.red,   msg:"Save the money. Sleep happens at home, not at 35,000 ft." },
+    ];
+
+    const VERDICT_MSGS = {
+      'Worth it':   'The math checks out. This upgrade earns its price.',
+      'Borderline': 'You are near the limit — a judgment call.',
+      'Pass':       'Paying above the per-hour threshold for this flight.',
+    };
+
+    // ── Logic ─────────────────────────────────────────────────────────
+    function calcThreshold(h) {
+      if (h < 2)  return 150;          // flat cap for short hops
+      if (h <= 6) return h * 100;      // $100/hr up to 6h (transcon)
+      if (h <= 10) return h * 120;     // $120/hr for medium long-haul (lie-flat)
+      return h * 150;                  // $150/hr for ultra long-haul
+    }
+
+    // PlusPoints valued at $20/pt — conservative (floor = $2 via TravelBank exchange;
+    // ceiling = $35-50/pt on optimal long-haul Polaris upgrades per TPG valuations)
+    function toDollars(type, amt, mAmt, cAmt) {
+      if (type === 'dollars') return amt ?? 0;
+      if (type === 'miles')   return (amt ?? 0) * 0.014;   // 1.4¢/mile
+      if (type === 'pp')      return (amt ?? 0) * 20;       // $20/PlusPoint
+      if (type === 'mm')      return ((mAmt ?? 0) * 0.014) + (cAmt ?? 0);
+      return 0;
+    }
+
+    function getVerdict(dv, h) {
+      const t = calcThreshold(h);
+      const r = dv / t;
+      if (r <= 0.75) return { label:'Worth it',   color:C.green, ratio:r };
+      if (r <= 1.0)  return { label:'Borderline', color:C.amber, ratio:r };
+      return              { label:'Pass',       color:C.red,   ratio:r };
+    }
+
+    function fmtPay(type, amt, mAmt, cAmt) {
+      if (type === 'dollars') return `$${amt?.toLocaleString()}`;
+      if (type === 'miles')   return `${(amt/1000).toFixed(0)}k miles`;
+      if (type === 'pp')      return `${amt} PlusPoints`;
+      if (type === 'mm')      return `${(mAmt/1000).toFixed(0)}k mi + $${cAmt}`;
+      return '';
+    }
+
+    function fmtChip(type, a) {
+      if (type === 'dollars') return a >= 1000 ? `$${a/1000}k` : `$${a}`;
+      if (type === 'pp')      return `${a} pts`;
+      return `${(a/1000).toFixed(0)}k`;
+    }
+
+    // ── Styles ────────────────────────────────────────────────────────
+    const S = {
+      root:       { minHeight:'100dvh', background:C.bg, color:C.text, fontFamily:"'DM Sans', sans-serif", display:'flex', flexDirection:'column', alignItems:'center', paddingBottom:64 },
+      header:     { width:'100%', padding:'14px 20px', background:'#0A1628', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', justifyContent:'space-between', position:'sticky', top:0, zIndex:10 },
+      brand:      { fontFamily:"'Barlow Condensed', sans-serif", fontWeight:800, fontSize:16, letterSpacing:'0.06em', textTransform:'uppercase', display:'flex', alignItems:'center', gap:8, color:C.text },
+      brandDot:   { width:26, height:26, borderRadius:'50%', background:C.blue, display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:800, color:'white', fontFamily:"'Barlow Condensed', sans-serif" },
+      resetBtn:   { background:'none', border:'none', color:C.muted, fontSize:13, cursor:'pointer', fontFamily:"'DM Sans', sans-serif", padding:'4px 8px' },
+      content:    { width:'100%', maxWidth:460, padding:'0 20px' },
+      dotsRow:    { display:'flex', gap:6, justifyContent:'center', padding:'18px 0 0' },
+      eyebrow:    { fontSize:11, fontWeight:600, letterSpacing:'0.1em', textTransform:'uppercase', color:C.blue, marginTop:28, marginBottom:10, display:'block' },
+      heading:    { fontFamily:"'Barlow Condensed', sans-serif", fontWeight:800, fontSize:38, lineHeight:1, letterSpacing:'-0.01em', margin:'0 0 6px' },
+      subtext:    { fontSize:14, color:C.muted, lineHeight:1.55, margin:'0 0 28px' },
+      grid2:      { display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:24 },
+      card:       { background:C.card, border:`1.5px solid ${C.border}`, borderRadius:16, padding:'18px 16px', cursor:'pointer', transition:'all 0.15s', textAlign:'left' },
+      cardSel:    { borderColor:C.blue, background:'rgba(30,127,217,0.12)' },
+      cardIcon:   { width:34, height:34, borderRadius:8, background:C.blue, display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, fontWeight:700, color:'white', marginBottom:10, letterSpacing:'0.02em', fontFamily:"'Barlow Condensed', sans-serif" },
+      cardLabel:  { fontFamily:"'Barlow Condensed', sans-serif", fontWeight:700, fontSize:22, marginBottom:2 },
+      cardSub:    { fontSize:12, color:C.muted },
+      durList:    { display:'flex', flexDirection:'column', gap:9, marginBottom:24 },
+      durCard:    { background:C.card, border:`1.5px solid ${C.border}`, borderRadius:14, padding:'13px 18px', cursor:'pointer', transition:'all 0.15s', display:'flex', alignItems:'center', justifyContent:'space-between' },
+      durCardSel: { borderColor:C.blue, background:'rgba(30,127,217,0.12)' },
+      durName:    { fontFamily:"'Barlow Condensed', sans-serif", fontWeight:700, fontSize:20, marginBottom:1 },
+      durEx:      { fontSize:12, color:C.muted },
+      lfBadge:    { fontSize:10, fontWeight:600, letterSpacing:'0.06em', color:C.gold, background:'rgba(245,166,35,0.12)', padding:'3px 8px', borderRadius:20, whiteSpace:'nowrap' },
+      chipRow:    { display:'flex', flexWrap:'wrap', gap:9, marginBottom:8 },
+      chipsLabel: { fontSize:11, fontWeight:600, letterSpacing:'0.08em', textTransform:'uppercase', color:C.muted, marginBottom:10, marginTop:20, display:'block' },
+      chip:       { background:C.card, border:'1.5px solid rgba(255,255,255,0.1)', borderRadius:100, padding:'10px 18px', fontSize:15, fontWeight:500, color:'white', cursor:'pointer', transition:'all 0.15s', fontFamily:"'DM Sans', sans-serif" },
+      chipSel:    { background:C.blue, border:`1.5px solid ${C.blue}` },
+      btn:        { width:'100%', background:C.blue, color:'white', border:'none', borderRadius:14, padding:18, fontFamily:"'Barlow Condensed', sans-serif", fontWeight:700, fontSize:20, letterSpacing:'0.04em', cursor:'pointer', marginTop:16, display:'block' },
+      btnGhost:   { width:'100%', background:'transparent', border:'1.5px solid rgba(255,255,255,0.12)', color:'#8A9BB0', borderRadius:14, padding:16, fontFamily:"'Barlow Condensed', sans-serif", fontWeight:700, fontSize:17, letterSpacing:'0.04em', cursor:'pointer', marginTop:10, display:'block' },
+      backBtn:    { background:'none', border:'none', color:C.muted, fontSize:13, cursor:'pointer', padding:'12px 0', display:'flex', alignItems:'center', gap:5, fontFamily:"'DM Sans', sans-serif" },
+      bp:         { background:C.card, borderRadius:20, overflow:'hidden', marginTop:24, marginBottom:16, border:'1.5px solid rgba(255,255,255,0.08)' },
+      bpTop:      { padding:'28px 24px 22px' },
+      verdictTxt: { fontFamily:"'Barlow Condensed', sans-serif", fontWeight:800, fontSize:56, lineHeight:1, letterSpacing:'-0.02em', marginBottom:8 },
+      verdictSub: { fontSize:14, color:C.muted, lineHeight:1.5 },
+      meterWrap:  { height:6, background:'rgba(255,255,255,0.07)', borderRadius:100, overflow:'hidden', margin:'18px 0 4px' },
+      meterFill:  { height:'100%', borderRadius:100, transition:'width 1s cubic-bezier(.34,1.1,.64,1)' },
+      meterLbl:   { fontSize:11, color:C.muted, display:'flex', justifyContent:'space-between' },
+      bpStats:    { padding:'18px 24px 22px', display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:16 },
+      statLbl:    { fontSize:10, fontWeight:600, letterSpacing:'0.08em', textTransform:'uppercase', color:C.muted, marginBottom:4 },
+      statVal:    { fontFamily:"'Barlow Condensed', sans-serif", fontWeight:700, fontSize:18 },
+      lfNote:     { background:'rgba(245,166,35,0.08)', border:'1px solid rgba(245,166,35,0.2)', borderRadius:12, padding:'12px 16px', fontSize:13, color:'#D4A040', lineHeight:1.5, marginBottom:12 },
+      ppNote:     { background:'rgba(30,127,217,0.05)', border:'1px solid rgba(30,127,217,0.12)', borderRadius:12, padding:'12px 16px', fontSize:13, color:C.muted, lineHeight:1.5, marginBottom:12 },
+      footNote:   { fontSize:12, color:'#3A4B5E', lineHeight:1.6, marginBottom:20 },
+      hero:       { paddingTop:36, position:'relative', overflow:'hidden' },
+      heroEye:    { fontSize:11, fontWeight:600, letterSpacing:'0.1em', textTransform:'uppercase', color:C.blue, marginBottom:12, display:'block', position:'relative', zIndex:1 },
+      heroTitle:  { fontFamily:"'Barlow Condensed', sans-serif", fontWeight:800, fontSize:52, lineHeight:0.95, letterSpacing:'-0.02em', marginBottom:14, position:'relative', zIndex:1 },
+      heroSub:    { fontSize:15, color:C.muted, lineHeight:1.65, marginBottom:36, position:'relative', zIndex:1 },
+      vibeOL:     { position:'fixed', inset:0, background:C.bg, zIndex:50, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:28, overflowY:'auto' },
+      vibeClose:  { position:'fixed', top:20, right:20, background:'rgba(255,255,255,0.08)', border:'none', width:36, height:36, borderRadius:'50%', color:'white', fontSize:18, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', zIndex:51 },
+      vibeProg:   { fontSize:12, color:C.muted, letterSpacing:'0.05em', marginBottom:8, textAlign:'center' },
+      vibeQ:      { fontFamily:"'Barlow Condensed', sans-serif", fontWeight:800, fontSize:30, lineHeight:1.2, textAlign:'center', marginBottom:32, maxWidth:320, whiteSpace:'pre-line' },
+      vibeOpts:   { display:'flex', flexDirection:'column', gap:11, width:'100%', maxWidth:380 },
+      vibeOpt:    { background:C.card, border:'1.5px solid rgba(255,255,255,0.1)', borderRadius:14, padding:'16px 20px', fontSize:16, color:'white', cursor:'pointer', textAlign:'left', fontFamily:"'DM Sans', sans-serif" },
+      vibeResult: { background:C.card, borderRadius:20, padding:'36px 28px', textAlign:'center', maxWidth:380, width:'100%' },
+      vibeVerdict:{ fontFamily:"'Barlow Condensed', sans-serif", fontWeight:800, fontSize:52, lineHeight:1, letterSpacing:'-0.02em', marginBottom:12 },
+    };
+
+    // ── Sub-components ────────────────────────────────────────────────
+    function Chip({ val, sel, onClick, label }) {
+      return (
+        <div style={{...S.chip, ...(sel ? S.chipSel : {})}} onClick={onClick}>
+          {label ?? val}
+        </div>
+      );
+    }
+
+    function Tear() {
+      return (
+        <div style={{ position:'relative', height:2, margin:'0 24px' }}>
+          <div style={{ borderTop:'2px dashed rgba(255,255,255,0.09)', position:'absolute', left:0, right:0, top:0 }} />
+          <div style={{ position:'absolute', width:22, height:22, background:'#06101F', borderRadius:'50%', top:-11, left:-35 }} />
+          <div style={{ position:'absolute', width:22, height:22, background:'#06101F', borderRadius:'50%', top:-11, right:-35 }} />
+        </div>
+      );
+    }
+
+    // Top-down airplane silhouette SVG — decorative hero element
+    function Plane() {
+      return (
+        <svg
+          viewBox="0 0 130 220"
+          xmlns="http://www.w3.org/2000/svg"
+          style={{ position:'absolute', right:-24, top:-8, width:170, height:'auto', opacity:0.065, pointerEvents:'none', zIndex:0 }}
+          aria-hidden="true"
+        >
+          {/* Fuselage body */}
+          <ellipse cx="65" cy="110" rx="14" ry="88" fill="#F5A623"/>
+          {/* Nose point */}
+          <path d="M65 22 L54 36 Q65 16 76 36 Z" fill="#F5A623"/>
+          {/* Main wings */}
+          <path d="M65 76 L4 108 L4 122 L65 104 L126 122 L126 108 Z" fill="#F5A623"/>
+          {/* Wing engine pods */}
+          <ellipse cx="18" cy="118" rx="10" ry="18" fill="#F5A623"/>
+          <ellipse cx="112" cy="118" rx="10" ry="18" fill="#F5A623"/>
+          {/* Horizontal stabilizers (tail) */}
+          <path d="M65 170 L28 183 L28 192 L65 180 L102 192 L102 183 Z" fill="#F5A623"/>
+          {/* Vertical stabilizer */}
+          <ellipse cx="65" cy="182" rx="7" ry="14" fill="#F5A623"/>
+          {/* Cockpit windows */}
+          <ellipse cx="65" cy="35" rx="5" ry="7" fill="#F5A623" opacity="0.6"/>
+        </svg>
+      );
+    }
+
+    // PlusPoints reference guide shown on step 3
+    function PPGuide() {
+      return (
+        <div style={{ background:'rgba(30,127,217,0.05)', border:'1px solid rgba(30,127,217,0.14)', borderRadius:14, padding:'14px 16px', marginTop:14 }}>
+          <div style={{ fontSize:10, fontWeight:600, letterSpacing:'0.09em', textTransform:'uppercase', color:C.muted, marginBottom:12 }}>
+            United upgrade chart — fixed until Feb 2027
+          </div>
+          {PP_CHART.map(row => (
+            <div key={row.pts} style={{ display:'flex', gap:12, alignItems:'flex-start', marginBottom:8 }}>
+              <span style={{ fontFamily:"'Barlow Condensed', sans-serif", fontWeight:700, fontSize:15, color:C.blue, minWidth:32, paddingTop:1 }}>
+                {row.pts}
+              </span>
+              <span style={{ fontSize:12, color:C.muted, lineHeight:1.45 }}>{row.desc}</span>
+            </div>
+          ))}
+          <div style={{ fontSize:11, color:'#2B3C50', marginTop:8, paddingTop:8, borderTop:'1px solid rgba(255,255,255,0.05)' }}>
+            ✦ Dynamic pricing replaces this chart Feb 2027. Basic Economy not upgradeable.
+          </div>
+        </div>
+      );
+    }
+
+    // ── Main App ──────────────────────────────────────────────────────
+    function App() {
+      const [step,     setStep]     = useState(0);
+      const [payType,  setPayType]  = useState(null);
+      const [durId,    setDurId]    = useState(null);
+      const [amt,      setAmt]      = useState(null);
+      const [mAmt,     setMAmt]     = useState(null);
+      const [cAmt,     setCAmt]     = useState(null);
+      const [vibeOpen, setVibeOpen] = useState(false);
+      const [vibeStep, setVibeStep] = useState(0);
+      const [vibeScore,setVibeScore]= useState(0);
+      const [vibeRes,  setVibeRes]  = useState(null);
+
+      const dur      = DURATIONS.find(d => d.id === durId);
+      const dv       = toDollars(payType, amt, mAmt, cAmt);
+      const res      = dur && dv > 0 ? getVerdict(dv, dur.hours) : null;
+      const thresh   = dur ? calcThreshold(dur.hours) : 0;
+      const amtReady = payType === 'mm' ? (mAmt != null && cAmt != null) : amt != null;
+      const rateHr   = dur ? (dur.hours < 2 ? null : dur.hours <= 6 ? 100 : dur.hours <= 10 ? 120 : 150) : null;
+
+      function reset() {
+        setStep(0); setPayType(null); setDurId(null);
+        setAmt(null); setMAmt(null); setCAmt(null);
+      }
+
+      function openVibe() {
+        setVibeOpen(true); setVibeStep(0); setVibeScore(0); setVibeRes(null);
+      }
+
+      function answerVibe(p) {
+        const ns = vibeScore + p;
+        if (vibeStep < 2) { setVibeScore(ns); setVibeStep(vibeStep + 1); }
+        else setVibeRes(VIBE_RESULTS.find(x => ns >= x.min));
+      }
+
+      return (
+        <div style={S.root}>
+
+          {/* ── Header ──────────────────────────── */}
+          <header style={S.header}>
+            <div style={S.brand}>
+              <div style={S.brandDot}>UA</div>
+              Upgrade Calc
+            </div>
+            {step > 0 && (
+              <button style={S.resetBtn} onClick={reset}>Start over</button>
+            )}
+          </header>
+
+          <div style={S.content}>
+
+            {/* Step dots */}
+            {step > 0 && step < 4 && (
+              <div style={S.dotsRow}>
+                {[1,2,3].map(i => (
+                  <div key={i} style={{
+                    height:5, borderRadius:3, transition:'all 0.3s',
+                    width: step === i ? 28 : 20,
+                    background: step === i ? C.blue : step > i ? 'rgba(30,127,217,0.4)' : 'rgba(255,255,255,0.12)',
+                  }} />
+                ))}
+              </div>
+            )}
+
+            {/* ── Step 0: Home ─────────────────── */}
+            {step === 0 && (
+              <div style={S.hero}>
+                <Plane />
+                <span style={S.heroEye}>United Airlines</span>
+                <h1 style={S.heroTitle}>
+                  Is the<br/>upgrade<br/>
+                  <span style={{ color:C.gold, fontStyle:'italic' }}>worth it?</span>
+                </h1>
+                <p style={S.heroSub}>
+                  Skip the guesswork. Pick your payment type, flight length,
+                  and upgrade cost — get a straight verdict in under a minute.
+                </p>
+                <button style={S.btn} onClick={() => setStep(1)}>Run the numbers →</button>
+                <div style={{ display:'flex', alignItems:'center', gap:12, color:C.muted, fontSize:12, margin:'12px 0' }}>
+                  <div style={{ flex:1, height:1, background:'rgba(255,255,255,0.07)' }}/>
+                  or
+                  <div style={{ flex:1, height:1, background:'rgba(255,255,255,0.07)' }}/>
+                </div>
+                <button style={S.btnGhost} onClick={openVibe}>Vibe check it ✦</button>
+              </div>
+            )}
+
+            {/* ── Step 1: Payment Type ─────────── */}
+            {step === 1 && (
+              <>
+                <span style={S.eyebrow}>Step 1 of 3</span>
+                <h2 style={S.heading}>How are you paying?</h2>
+                <p style={S.subtext}>Select what United is asking for.</p>
+                <div style={S.grid2}>
+                  {PAY_TYPES.map(p => (
+                    <div
+                      key={p.id}
+                      style={{ ...S.card, ...(payType === p.id ? S.cardSel : {}) }}
+                      onClick={() => { setPayType(p.id); setAmt(null); setMAmt(null); setCAmt(null); }}
+                    >
+                      <div style={S.cardIcon}>{p.icon}</div>
+                      <div style={S.cardLabel}>{p.label}</div>
+                      <div style={S.cardSub}>{p.sub}</div>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  style={{ ...S.btn, opacity: payType ? 1 : 0.3 }}
+                  disabled={!payType}
+                  onClick={() => setStep(2)}
+                >
+                  Continue →
+                </button>
+              </>
+            )}
+
+            {/* ── Step 2: Duration ─────────────── */}
+            {step === 2 && (
+              <>
+                <button style={S.backBtn} onClick={() => setStep(1)}>← Back</button>
+                <span style={S.eyebrow}>Step 2 of 3</span>
+                <h2 style={S.heading}>How long is the flight?</h2>
+                <p style={S.subtext}>Pick the closest match. Lie-flat seat assumed for 6h+.</p>
+                <div style={S.durList}>
+                  {DURATIONS.map(d => (
+                    <div
+                      key={d.id}
+                      style={{ ...S.durCard, ...(durId === d.id ? S.durCardSel : {}) }}
+                      onClick={() => setDurId(d.id)}
+                    >
+                      <div>
+                        <div style={S.durName}>{d.label}</div>
+                        <div style={S.durEx}>{d.ex}{d.lf ? ' ✦' : ''}</div>
+                      </div>
+                      {d.lf && <span style={S.lfBadge}>Lie-flat</span>}
+                    </div>
+                  ))}
+                </div>
+                <button
+                  style={{ ...S.btn, opacity: durId ? 1 : 0.3 }}
+                  disabled={!durId}
+                  onClick={() => setStep(3)}
+                >
+                  Continue →
+                </button>
+              </>
+            )}
+
+            {/* ── Step 3: Amount ───────────────── */}
+            {step === 3 && (
+              <>
+                <button style={S.backBtn} onClick={() => setStep(2)}>← Back</button>
+                <span style={S.eyebrow}>Step 3 of 3</span>
+                <h2 style={S.heading}>What is the upgrade cost?</h2>
+                <p style={S.subtext}>Pick the closest amount to your offer.</p>
+
+                {/* Cash */}
+                {payType === 'dollars' && (
+                  <>
+                    <span style={S.chipsLabel}>Dollar amount</span>
+                    <div style={S.chipRow}>
+                      {AMT.dollars.map(a => (
+                        <Chip key={a} val={a} sel={amt===a} onClick={() => setAmt(a)} label={fmtChip('dollars',a)} />
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {/* Miles */}
+                {payType === 'miles' && (
+                  <>
+                    <span style={S.chipsLabel}>Miles required</span>
+                    <div style={S.chipRow}>
+                      {AMT.miles.map(a => (
+                        <Chip key={a} val={a} sel={amt===a} onClick={() => setAmt(a)} label={fmtChip('miles',a)} />
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {/* PlusPoints */}
+                {payType === 'pp' && (
+                  <>
+                    <span style={S.chipsLabel}>PlusPoints required</span>
+                    <div style={S.chipRow}>
+                      {PP_AMOUNTS.map(a => (
+                        <Chip key={a} val={a} sel={amt===a} onClick={() => setAmt(a)} label={`${a} pts`} />
+                      ))}
+                    </div>
+                    <PPGuide />
+                  </>
+                )}
+
+                {/* Miles + Money */}
+                {payType === 'mm' && (
+                  <>
+                    <span style={S.chipsLabel}>Miles component</span>
+                    <div style={S.chipRow}>
+                      {MM_MILES.map(a => (
+                        <Chip key={a} val={a} sel={mAmt===a} onClick={() => setMAmt(a)} label={`${(a/1000).toFixed(0)}k`} />
+                      ))}
+                    </div>
+                    <span style={{ ...S.chipsLabel, marginTop:16 }}>Cash copay</span>
+                    <div style={S.chipRow}>
+                      {MM_CASH.map(a => (
+                        <Chip key={a} val={a} sel={cAmt===a} onClick={() => setCAmt(a)} label={`$${a}`} />
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                <button
+                  style={{ ...S.btn, marginTop:20, opacity: amtReady ? 1 : 0.3 }}
+                  disabled={!amtReady}
+                  onClick={() => setStep(4)}
+                >
+                  See verdict →
+                </button>
+              </>
+            )}
+
+            {/* ── Step 4: Result ───────────────── */}
+            {step === 4 && res && dur && (
+              <>
+                <span style={{ ...S.eyebrow, marginTop:24 }}>The verdict</span>
+
+                {/* Boarding-pass result card */}
+                <div style={S.bp}>
+                  <div style={S.bpTop}>
+                    <div style={{ ...S.verdictTxt, color:res.color }}>{res.label}</div>
+                    <div style={S.verdictSub}>{VERDICT_MSGS[res.label]}</div>
+                    <div style={S.meterWrap}>
+                      <div style={{ ...S.meterFill, width:`${Math.min(res.ratio*100, 100)}%`, background:res.color }} />
+                    </div>
+                    <div style={S.meterLbl}>
+                      <span>$0</span>
+                      <span>Max: ${thresh.toLocaleString()}</span>
+                    </div>
+                  </div>
+
+                  <Tear />
+
+                  <div style={S.bpStats}>
+                    <div>
+                      <div style={S.statLbl}>You pay</div>
+                      <div style={S.statVal}>{fmtPay(payType, amt, mAmt, cAmt)}</div>
+                    </div>
+                    <div>
+                      <div style={S.statLbl}>$ value</div>
+                      <div style={S.statVal}>${Math.round(dv).toLocaleString()}</div>
+                    </div>
+                    <div>
+                      <div style={S.statLbl}>Eff. $/hr</div>
+                      <div style={{ ...S.statVal, color: res.ratio > 1 ? C.red : C.text }}>
+                        ${Math.round(dv / dur.hours)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {dur.lf && (
+                  <div style={S.lfNote}>
+                    ✦ Lie-flat seat assumed — ${rateHr}/hr threshold applies (vs. $100/hr for domestic), reflecting the premium value of a full flat bed on a long haul.
+                  </div>
+                )}
+
+                {payType === 'pp' && (
+                  <div style={S.ppNote}>
+                    PlusPoints valued at $20/pt (conservative working estimate). Range: $2/pt TravelBank floor → $35-50/pt on optimal long-haul Polaris upgrades.
+                  </div>
+                )}
+
+                <div style={S.footNote}>
+                  Thresholds: $100/hr (&lt;6h) · $120/hr (6–10h) · $150/hr (10h+). Miles: 1.4¢ each. Dynamic pricing replaces the PP chart Feb 2027.
+                </div>
+
+                <button style={S.btnGhost} onClick={reset}>← Calculate another</button>
+              </>
+            )}
+          </div>
+
+          {/* ── Vibe Check Overlay ────────────── */}
+          {vibeOpen && (
+            <div style={S.vibeOL}>
+              <button style={S.vibeClose} onClick={() => setVibeOpen(false)}>✕</button>
+
+              {!vibeRes ? (
+                <>
+                  <div style={S.vibeProg}>Question {vibeStep + 1} of 3</div>
+                  <div style={S.vibeQ}>{VIBE_QS[vibeStep].q}</div>
+                  <div style={S.vibeOpts}>
+                    {VIBE_QS[vibeStep].opts.map((o, i) => (
+                      <button key={i} style={S.vibeOpt} onClick={() => answerVibe(o.p)}>
+                        {o.l}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div style={S.vibeResult}>
+                  <div style={{ fontSize:44, marginBottom:12, color:vibeRes.c, fontFamily:"'Barlow Condensed', sans-serif", fontWeight:800 }}>
+                    {vibeRes.v === 'Book it' || vibeRes.v === 'Worth it' ? '✓' : vibeRes.v === 'Pass' ? '✗' : '~'}
+                  </div>
+                  <div style={{ ...S.vibeVerdict, color:vibeRes.c }}>{vibeRes.v}</div>
+                  <div style={{ fontSize:16, color:'#8A9BB0', lineHeight:1.6, marginBottom:24 }}>{vibeRes.msg}</div>
+                  <button style={S.btn} onClick={() => { setVibeOpen(false); reset(); }}>
+                    Run the numbers →
+                  </button>
+                  <button style={S.btnGhost} onClick={openVibe}>Try again</button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const domRoot = ReactDOM.createRoot(document.getElementById('root'));
+    domRoot.render(<App />);
+  </script>
+</body>
+</html>
